@@ -1,1 +1,6 @@
-<resources><color name="bg">#0A0A18</color></resources>
+<resources>
+    <color name="accent">#7868F5</color>
+    <color name="bg">#101116</color>
+    <color name="bg_dark">#101116</color>
+    <color name="bg_light">#F5F6FA</color>
+</resources>

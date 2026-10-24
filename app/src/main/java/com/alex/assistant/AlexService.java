@@ -11,7 +11,6 @@ import android.graphics.PixelFormat;
 import android.graphics.drawable.Icon;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
-import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -24,24 +23,21 @@ import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
+import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.Locale;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
+/** Foreground microphone service: floating orb, optional wake phrase, voice input and spoken replies. */
 public class AlexService extends Service {
     public static boolean running;
-    private static final String[] WAKE = {"hey alex", "hi alex", "ok alex", "okay alex", "hello alex", "alex start", "hey alexa", "a alex"};
+    public static volatile AlexService instance;
+    private static final String[] WAKE = {"hey alex", "hi alex", "ok alex", "okay alex", "hello alex", "alex start"};
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager wm;
@@ -52,14 +48,19 @@ public class AlexService extends Service {
     private TextToSpeech tts;
     private boolean ttsReady, speaking;
     private SpeechRecognizer rec;
-    private int mode; // 0 = waiting for wake word, 1 = listening for command
-    private ActionExecutor exec;
+    private int mode; // 0 = wake phrase, 1 = command
+    private final AlexBrain.Listener brainListener = s -> main.post(() -> {
+        if (s == 2) anim(OrbAnimator.THINKING);
+        else if (s == 4) anim(OrbAnimator.EXECUTING);
+        else if (s == 5) anim(OrbAnimator.ERROR);
+        else if (s == 0 && !speaking && rec == null) anim(OrbAnimator.IDLE);
+    });
 
     @Override public IBinder onBind(Intent i) { return null; }
 
     @Override public int onStartCommand(Intent i, int f, int id) {
         if (i != null && "stop".equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
-        if (!running) { running = true; init(); }
+        if (!running) { running = true; instance = this; init(); }
         return START_STICKY;
     }
 
@@ -68,26 +69,27 @@ public class AlexService extends Service {
         nm.createNotificationChannel(new NotificationChannel("alex", "Alex AI", NotificationManager.IMPORTANCE_LOW));
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, AlexService.class).setAction("stop"), PendingIntent.FLAG_IMMUTABLE);
-        Notification n = new Notification.Builder(this, "alex").setContentTitle("Alex is ready")
-            .setContentText("Say “Hey Alex”").setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(open)
+        Notification n = new Notification.Builder(this, "alex").setContentTitle("Alex AI")
+            .setContentText(Prefs.wake(this) ? "Microphone is on, listening for “Hey Alex”" : "Ready. The microphone is only used when you tap the orb.")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(open)
             .addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_delete), "Stop", stop).build()).build();
         try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             else startForeground(1, n);
-        } catch (Exception e) { stopSelf(); return; }
+        } catch (Exception e) { running = false; instance = null; stopSelf(); return; }
 
-        exec = new ActionExecutor(this);
         addFab();
+        AlexBrain.listeners.add(brainListener);
         tts = new TextToSpeech(this, st -> {
             if (st != TextToSpeech.SUCCESS) return;
-            tts.setLanguage(Locale.US);
-            tts.setPitch(1.3f);          // young boy
-            tts.setSpeechRate(1.05f);
+            tts.setLanguage(Locale.forLanguageTag(Prefs.lang(this)));
+            tts.setPitch(Prefs.pitch(this) / 100f);
+            tts.setSpeechRate(Prefs.rate(this) / 100f);
             try {
                 for (Voice v : tts.getVoices()) {
                     String nm2 = v.getName().toLowerCase();
                     boolean male = (nm2.contains("male") && !nm2.contains("female")) || nm2.contains("-iom-") || nm2.contains("-iol-") || nm2.contains("-tpd-");
-                    if (male && v.getLocale().getLanguage().equals("en") && !v.isNetworkConnectionRequired()) { tts.setVoice(v); break; }
+                    if (male && v.getLocale().getLanguage().equals(Locale.forLanguageTag(Prefs.lang(this)).getLanguage()) && !v.isNetworkConnectionRequired()) { tts.setVoice(v); break; }
                 }
             } catch (Exception ignored) {}
             ttsReady = true;
@@ -96,18 +98,25 @@ public class AlexService extends Service {
                 @Override public void onDone(String u) { main.post(() -> { if (!tts.isSpeaking()) { speaking = false; resume(); } }); }
                 @Override public void onError(String u) { onDone(u); }
             });
-            main.post(() -> { speak(Prefs.key(this).isEmpty() ? "Hi, I am Alex. Add your Gemini key in settings." : "Hi, I'm Alex. Say hey Alex anytime."); });
+            main.post(this::resume);
         });
     }
 
-    // ---------- floating orb ----------
+    // ---- static helpers used by AlexBrain ----
+    public static void say(String s) { AlexService i = instance; if (i != null) i.main.post(() -> i.speak(s)); }
+    public static void stopSpeaking() { AlexService i = instance; if (i != null) i.main.post(() -> { if (i.tts != null) i.tts.stop(); i.speaking = false; i.destroyRec(); }); }
+    public void listenNow() { chime(); main.postDelayed(() -> listen(true), 250); }
+
+    // ---- floating orb ----
+    private void anim(int s) { if (anim != null) anim.set(s); }
+
     private void addFab() {
-        if (!Settings.canDrawOverlays(this)) { Toast.makeText(this, "Allow “Display over other apps” for the floating orb", Toast.LENGTH_LONG).show(); return; }
+        if (!Settings.canDrawOverlays(this)) return;
         wm = getSystemService(WindowManager.class);
-        fab = LayoutInflater.from(this).inflate(R.layout.overlay_fab, null);
+        fab = LayoutInflater.from(new ContextThemeWrapper(this, R.style.AppTheme_Dark)).inflate(R.layout.overlay_fab, null);
         bubble = fab.findViewById(R.id.bubble);
         anim = new OrbAnimator(fab.findViewById(R.id.orb), fab.findViewById(R.id.halo));
-        anim.idle();
+        anim.set(OrbAnimator.IDLE);
         lp = new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
@@ -132,8 +141,8 @@ public class AlexService extends Service {
     }
 
     private void onOrbTap() {
-        if (speaking && tts != null) { tts.stop(); speaking = false; }
-        chime(); main.postDelayed(() -> listen(true), 250);
+        if (speaking || mode == 1 && rec != null) { AlexBrain.cancel(this); speaking = false; destroyRec(); resume(); return; }
+        listenNow();
     }
 
     private void show(String s) {
@@ -142,20 +151,14 @@ public class AlexService extends Service {
         main.removeCallbacks(hide); main.postDelayed(hide, 7000);
     }
     private final Runnable hide = () -> { if (bubble != null) bubble.setVisibility(View.GONE); };
-
-    private void state(int s) {
-        if (anim == null) return;
-        if (s == 0) anim.idle(); else if (s == 1) anim.listening(); else if (s == 2) anim.thinking(); else anim.speaking();
-    }
-
     private void chime() { try { new ToneGenerator(AudioManager.STREAM_MUSIC, 60).startTone(ToneGenerator.TONE_PROP_ACK, 120); } catch (Exception ignored) {} }
 
-    // ---------- listening ----------
+    // ---- listening ----
     private void destroyRec() {
         if (rec != null) { rec.setRecognitionListener(null); try { rec.cancel(); rec.destroy(); } catch (Exception ignored) {} rec = null; }
     }
 
-    private void resume() { if (!running) return; if (Prefs.wake(this)) listen(false); else state(0); }
+    private void resume() { if (!running) return; if (Prefs.wake(this)) listen(false); else { destroyRec(); anim(OrbAnimator.IDLE); } }
 
     private void listen(boolean command) {
         main.post(() -> {
@@ -163,7 +166,7 @@ public class AlexService extends Service {
             if (!SpeechRecognizer.isRecognitionAvailable(this)) { show("Speech recognition isn't available on this device"); return; }
             destroyRec();
             mode = command ? 1 : 0;
-            state(command ? 1 : 0);
+            anim(command ? OrbAnimator.LISTENING : OrbAnimator.IDLE);
             if (command) show("Listening…");
             rec = SpeechRecognizer.createSpeechRecognizer(this);
             rec.setRecognitionListener(new RecognitionListener() {
@@ -183,13 +186,14 @@ public class AlexService extends Service {
                     ArrayList<String> l = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     if (l == null || l.isEmpty()) { resume(); return; }
                     String text = l.get(0).trim();
-                    if (mode == 1) { handle(text); return; }
+                    if (mode == 1) { destroyRec(); show("You: " + text); AlexBrain.submit(AlexService.this, text); return; }
                     String low = text.toLowerCase(Locale.ROOT);
                     for (String w : WAKE) {
                         int i = low.indexOf(w);
                         if (i >= 0) {
                             String rest = text.substring(i + w.length()).replaceFirst("^[,.\\s]+", "");
-                            if (rest.length() > 2) handle(rest); else { chime(); main.postDelayed(() -> listen(true), 250); }
+                            if (rest.length() > 2) { destroyRec(); show("You: " + rest); AlexBrain.submit(AlexService.this, rest); }
+                            else listenNow();
                             return;
                         }
                     }
@@ -198,43 +202,24 @@ public class AlexService extends Service {
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Prefs.lang(this));
             i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
             rec.startListening(i);
         });
     }
 
-    // ---------- brain ----------
-    private void handle(String text) {
-        destroyRec();
-        show("You: " + text);
-        state(2);
-        new Thread(() -> {
-            JSONObject r = GeminiClient.ask(this, text, context());
-            String sp = r.optString("speech");
-            JSONArray ac = r.optJSONArray("actions");
-            main.post(() -> speak(sp));
-            if (ac != null && ac.length() > 0) exec.run(ac, s -> main.post(() -> speak(s)));
-        }).start();
-    }
-
-    private String context() {
-        String time = new SimpleDateFormat("EEEE, d MMM yyyy, h:mm a", Locale.US).format(new Date());
-        int bat = getSystemService(BatteryManager.class).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-        String screen = AlexAccessibilityService.active() ? AlexAccessibilityService.instance.screenText() : "(accessibility off)";
-        return "Time: " + time + "\nBattery: " + bat + "%\nScreen: " + screen;
-    }
-
     private void speak(String s) {
-        if (s == null || s.trim().isEmpty() || !ttsReady) { if (!speaking) resume(); return; }
+        show("Alex: " + s);
+        if (!Prefs.speak(this) || !ttsReady || s == null || s.trim().isEmpty()) { if (!speaking) resume(); return; }
         destroyRec();
         speaking = true;
-        show("Alex: " + s);
-        state(3);
+        anim(OrbAnimator.SPEAKING);
         tts.speak(s, TextToSpeech.QUEUE_ADD, null, "u" + System.nanoTime());
     }
 
     @Override public void onDestroy() {
-        running = false;
+        running = false; instance = null;
+        AlexBrain.listeners.remove(brainListener);
         destroyRec();
         main.removeCallbacksAndMessages(null);
         if (anim != null) anim.stop();

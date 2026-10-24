@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.List;
 
+/** Performs only the narrowly defined actions in ActionRegistry. It never collects screen text on its own. */
 public class AlexAccessibilityService extends AccessibilityService {
     public static AlexAccessibilityService instance;
     private final Handler h = new Handler(Looper.getMainLooper());
@@ -23,13 +24,10 @@ public class AlexAccessibilityService extends AccessibilityService {
     @Override public void onInterrupt() {}
     @Override public boolean onUnbind(Intent i) { instance = null; return super.onUnbind(i); }
 
-    // ---------- node actions ----------
     private AccessibilityNodeInfo clickableParent(AccessibilityNodeInfo n) {
         while (n != null && !n.isClickable()) n = n.getParent();
         return n;
     }
-
-    public boolean clickText(String t) { return clickText(t, false); }
 
     public boolean clickText(String t, boolean longPress) {
         AccessibilityNodeInfo r = getRootInActiveWindow();
@@ -42,23 +40,7 @@ public class AlexAccessibilityService extends AccessibilityService {
         return false;
     }
 
-    /** Click first clickable node whose text or content-description contains s. */
-    public boolean clickContaining(String s) {
-        AccessibilityNodeInfo n = findContaining(getRootInActiveWindow(), s.toLowerCase());
-        AccessibilityNodeInfo c = clickableParent(n);
-        return c != null && c.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-    }
-
-    private AccessibilityNodeInfo findContaining(AccessibilityNodeInfo n, String s) {
-        if (n == null) return null;
-        CharSequence a = n.getContentDescription(), b = n.getText();
-        if ((a != null && a.toString().toLowerCase().contains(s)) || (b != null && b.toString().toLowerCase().contains(s))) return n;
-        for (int i = 0; i < n.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findContaining(n.getChild(i), s);
-            if (r != null) return r;
-        }
-        return null;
-    }
+    public boolean clickText(String t) { return clickText(t, false); }
 
     private AccessibilityNodeInfo firstEditable(AccessibilityNodeInfo n) {
         if (n == null) return null;
@@ -88,11 +70,9 @@ public class AlexAccessibilityService extends AccessibilityService {
         return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
     }
 
-    public boolean inputAction(int action) {
-        AccessibilityNodeInfo n = input();
-        return n != null && n.performAction(action);
-    }
+    public boolean inputAction(int action) { AccessibilityNodeInfo n = input(); return n != null && n.performAction(action); }
 
+    /** Only called when the user has enabled "read on-screen text" or asked Alex to read the screen. */
     public String screenText() {
         StringBuilder sb = new StringBuilder();
         collect(getRootInActiveWindow(), sb);
@@ -100,41 +80,33 @@ public class AlexAccessibilityService extends AccessibilityService {
     }
 
     private void collect(AccessibilityNodeInfo n, StringBuilder sb) {
-        if (n == null || sb.length() > 1500 || !n.isVisibleToUser()) return;
+        if (n == null || sb.length() > 1500 || !n.isVisibleToUser() || n.isPassword()) return;
         CharSequence t = n.getText(), d = n.getContentDescription();
         if (t != null && t.length() > 0) sb.append(t).append(" | ");
         else if (d != null && d.length() > 0) sb.append(d).append(" | ");
         for (int i = 0; i < n.getChildCount(); i++) collect(n.getChild(i), sb);
     }
 
-    // ---------- gestures ----------
-    private GestureDescription.StrokeDescription stroke(Path p, long ms) {
-        return new GestureDescription.StrokeDescription(p, 0, ms);
-    }
+    private GestureDescription.StrokeDescription stroke(Path p, long ms) { return new GestureDescription.StrokeDescription(p, 0, ms); }
+    private DisplayMetrics dm() { return getResources().getDisplayMetrics(); }
 
     public void swipe(float x1, float y1, float x2, float y2, long ms) {
         Path p = new Path(); p.moveTo(x1, y1); p.lineTo(x2, y2);
         dispatchGesture(new GestureDescription.Builder().addStroke(stroke(p, ms)).build(), null, null);
     }
 
-    public void tap(float x, float y) {
-        Path p = new Path(); p.moveTo(x, y);
-        dispatchGesture(new GestureDescription.Builder().addStroke(stroke(p, 60)).build(), null, null);
-    }
-
-    public void doubleTap(float x, float y) { tap(x, y); h.postDelayed(() -> tap(x, y), 130); }
-
-    private DisplayMetrics dm() { return getResources().getDisplayMetrics(); }
-
     public void tapFraction(float fx, float fy, boolean dbl) {
         float x = fx * dm().widthPixels, y = fy * dm().heightPixels;
-        if (dbl) doubleTap(x, y); else tap(x, y);
+        Path p = new Path(); p.moveTo(x, y);
+        GestureDescription g = new GestureDescription.Builder().addStroke(stroke(p, 60)).build();
+        dispatchGesture(g, null, null);
+        if (dbl) h.postDelayed(() -> dispatchGesture(g, null, null), 130);
     }
 
     public void scroll(String dir) {
         float w = dm().widthPixels, hh = dm().heightPixels;
         switch (dir) {
-            case "down":  swipe(w * .5f, hh * .72f, w * .5f, hh * .28f, 350); break; // reveal lower content
+            case "down":  swipe(w * .5f, hh * .72f, w * .5f, hh * .28f, 350); break;
             case "up":    swipe(w * .5f, hh * .28f, w * .5f, hh * .72f, 350); break;
             case "left":  swipe(w * .8f, hh * .5f, w * .2f, hh * .5f, 300); break;
             case "right": swipe(w * .2f, hh * .5f, w * .8f, hh * .5f, 300); break;
@@ -142,9 +114,8 @@ public class AlexAccessibilityService extends AccessibilityService {
     }
 
     public void pinch(boolean zoomIn) {
-        float cx = dm().widthPixels / 2f, cy = dm().heightPixels / 2f, s = Math.min(dm().widthPixels, dm().heightPixels) * 0.35f;
+        float cx = dm().widthPixels / 2f, cy = dm().heightPixels / 2f, s = Math.min(dm().widthPixels, dm().heightPixels) * 0.35f, near = s * 0.15f;
         Path a = new Path(), b = new Path();
-        float near = s * 0.15f;
         if (zoomIn) { a.moveTo(cx - near, cy); a.lineTo(cx - s, cy); b.moveTo(cx + near, cy); b.lineTo(cx + s, cy); }
         else        { a.moveTo(cx - s, cy); a.lineTo(cx - near, cy); b.moveTo(cx + s, cy); b.lineTo(cx + near, cy); }
         dispatchGesture(new GestureDescription.Builder().addStroke(stroke(a, 400)).addStroke(stroke(b, 400)).build(), null, null);

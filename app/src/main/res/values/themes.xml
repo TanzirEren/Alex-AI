@@ -1,10 +1,29 @@
 <resources>
-    <style name="AppTheme" parent="android:Theme.DeviceDefault.NoActionBar">
-        <item name="android:windowBackground">@drawable/bg_app</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:textColor">#FFFFFF</item>
+    <style name="AppTheme.Dark" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="android:statusBarColor">@color/bg_dark</item>
+        <item name="android:navigationBarColor">@color/bg_dark</item>
+        <item name="alexText">#F5F5F7</item><item name="alexText2">#B6B7C3</item>
+        <item name="alexGlass">#1FFFFFFF</item><item name="alexStroke">#33FFFFFF</item>
+        <item name="alexAccent">@color/accent</item><item name="alexSurface">#1A1B23</item>
     </style>
-    <style name="Row"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:padding">10dp</item><item name="android:textSize">15sp</item><item name="android:textColor">#FFFFFF</item></style>
-    <style name="Tab"><item name="android:layout_width">56dp</item><item name="android:layout_height">56dp</item><item name="android:padding">16dp</item><item name="android:layout_margin">2dp</item><item name="android:background">@drawable/nav_item_bg</item></style>
+    <style name="AppTheme.Light" parent="android:Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg_light</item>
+        <item name="android:statusBarColor">@color/bg_light</item>
+        <item name="android:navigationBarColor">@color/bg_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="alexText">#15151B</item><item name="alexText2">#666875</item>
+        <item name="alexGlass">#B3FFFFFF</item><item name="alexStroke">#1F000000</item>
+        <item name="alexAccent">@color/accent</item><item name="alexSurface">#FFFFFF</item>
+    </style>
+    <style name="Card"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:orientation">vertical</item><item name="android:padding">18dp</item><item name="android:background">@drawable/glass_card</item><item name="android:layout_marginBottom">14dp</item></style>
+    <style name="Label"><item name="android:layout_width">wrap_content</item><item name="android:layout_height">wrap_content</item><item name="android:textSize">13sp</item><item name="android:textColor">?attr/alexText2</item><item name="android:layout_marginTop">10dp</item></style>
+    <style name="Body"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:textSize">15sp</item><item name="android:textColor">?attr/alexText</item></style>
+    <style name="Row" parent="Body"><item name="android:padding">10dp</item></style>
+    <style name="Field"><item name="android:layout_width">match_parent</item><item name="android:layout_height">50dp</item><item name="android:singleLine">true</item><item name="android:padding">14dp</item><item name="android:textColor">?attr/alexText</item><item name="android:textColorHint">?attr/alexText2</item><item name="android:background">@drawable/input_bg</item><item name="android:layout_marginTop">6dp</item></style>
+    <style name="Btn"><item name="android:layout_width">match_parent</item><item name="android:layout_height">48dp</item><item name="android:gravity">center</item><item name="android:textSize">15sp</item><item name="android:textColor">#FFFFFF</item><item name="android:background">@drawable/btn_primary</item><item name="android:layout_marginTop">12dp</item></style>
+    <style name="BtnGhost" parent="Btn"><item name="android:textColor">?attr/alexText</item><item name="android:background">@drawable/glass_pill</item></style>
+    <style name="TabItem"><item name="android:layout_width">74dp</item><item name="android:layout_height">56dp</item><item name="android:orientation">vertical</item><item name="android:gravity">center</item><item name="android:background">@drawable/nav_item_bg</item></style>
+    <style name="TabIcon"><item name="android:layout_width">22dp</item><item name="android:layout_height">22dp</item><item name="android:tint">?attr/alexText</item></style>
+    <style name="TabText"><item name="android:layout_width">wrap_content</item><item name="android:layout_height">wrap_content</item><item name="android:textSize">10sp</item><item name="android:textColor">?attr/alexText</item><item name="android:layout_marginTop">2dp</item></style>
 </resources>

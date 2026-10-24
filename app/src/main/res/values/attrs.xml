@@ -1,0 +1,5 @@
+<resources>
+    <attr name="alexText" format="color"/><attr name="alexText2" format="color"/>
+    <attr name="alexGlass" format="color"/><attr name="alexStroke" format="color"/>
+    <attr name="alexAccent" format="color"/><attr name="alexSurface" format="color"/>
+</resources>

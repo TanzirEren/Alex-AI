@@ -3,10 +3,10 @@
     android:layout_width="wrap_content" android:layout_height="wrap_content"
     android:orientation="vertical" android:gravity="center_horizontal">
     <FrameLayout android:layout_width="100dp" android:layout_height="100dp">
-        <ImageView android:id="@+id/halo" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:src="@drawable/alex_orb" android:alpha="0"/>
-        <ImageView android:id="@+id/orb" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:src="@drawable/alex_orb"/>
+        <ImageView android:id="@+id/halo" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:src="@drawable/alex_orb" android:alpha="0" android:contentDescription="@null"/>
+        <ImageView android:id="@+id/orb" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:src="@drawable/alex_orb" android:contentDescription="Alex assistant button"/>
     </FrameLayout>
     <TextView android:id="@+id/bubble" android:layout_width="wrap_content" android:layout_height="wrap_content"
         android:maxWidth="250dp" android:visibility="gone" android:padding="12dp" android:textSize="13sp"
-        android:textColor="#FFFFFF" android:background="@drawable/glass_card"/>
+        android:textColor="?attr/alexText" android:background="@drawable/confirm_bg"/>
 </LinearLayout>

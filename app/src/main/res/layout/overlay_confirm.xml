@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:padding="22dp" android:background="@drawable/confirm_bg">
+    <TextView android:id="@+id/c_title" style="@style/Body" android:textSize="18sp" android:textStyle="bold"/>
+    <TextView android:id="@+id/c_detail" style="@style/Body" android:layout_marginTop="10dp" android:textColor="?attr/alexText2"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="18dp">
+        <TextView android:id="@+id/c_no" style="@style/BtnGhost" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Cancel"/>
+        <TextView android:id="@+id/c_yes" style="@style/Btn" android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="8dp" android:text="Confirm"/>
+    </LinearLayout>
+</LinearLayout>

@@ -9,18 +9,15 @@ import android.database.Cursor;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
 import android.net.Uri;
-import android.os.Build;
 import android.provider.AlarmClock;
 import android.provider.ContactsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
-import android.telephony.SmsManager;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Turns Gemini's JSON actions into real phone control. */
+/** Executes ONE already-validated action through supported Android APIs. Returns true only if it really started. */
 public class ActionExecutor {
     public interface Say { void say(String s); }
 
@@ -31,132 +28,117 @@ public class ActionExecutor {
 
     private AlexAccessibilityService a() { return AlexAccessibilityService.instance; }
     private static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) {} }
-
-    public void run(JSONArray acts, Say say) {
-        this.say = say;
-        for (int i = 0; i < acts.length(); i++) {
-            JSONObject o = acts.optJSONObject(i);
-            if (o == null) continue;
-            try { exec(o); } catch (Exception ignored) {}
-            sleep(450);
-        }
-    }
-
-    private boolean need() {
-        if (a() != null) return true;
-        say.say("Please enable my accessibility service first.");
-        return false;
-    }
-
-    private boolean start(Intent i) {
-        try { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(i); return true; }
-        catch (Exception e) { return false; }
-    }
-
-    private boolean view(String url) { return start(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
     private static String enc(String s) { return Uri.encode(s); }
 
-    private void exec(JSONObject o) throws Exception {
-        String t = o.optString("type");
+    private boolean start(Intent i) {
+        try { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(i); return true; } catch (Exception e) { return false; }
+    }
+    private boolean view(String url) { return start(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+    private boolean global(int g) { return a() != null && a().global(g); }
+
+    public boolean exec(JSONObject o, Say say) throws Exception {
+        this.say = say;
         AlexAccessibilityService s = a();
+        String t = o.optString("type");
         switch (t) {
-            // ----- apps -----
-            case "open_app": if (!openApp(o.optString("name"))) say.say("I couldn't find " + o.optString("name")); break;
-            case "close_app": if (need()) { s.global(AccessibilityService.GLOBAL_ACTION_RECENTS); sleep(900);
-                float w = c.getResources().getDisplayMetrics().widthPixels, h = c.getResources().getDisplayMetrics().heightPixels;
-                s.swipe(w * .5f, h * .65f, w * .5f, h * .1f, 250); sleep(500); s.global(AccessibilityService.GLOBAL_ACTION_HOME); } break;
-            case "back": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_BACK); break;
-            case "home": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_HOME); break;
-            case "recents": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_RECENTS); break;
-            case "notifications": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS); break;
-            case "quick_settings": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS); break;
-            case "screenshot": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT); break;
-            case "lock": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN); break;
-            case "power_menu": if (need()) s.global(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG); break;
-            case "uninstall_app": { String p = findPackage(o.optString("name"));
-                if (p == null) { say.say("I couldn't find that app."); break; }
-                start(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + p)));
-                if (a() != null) { sleep(1500); if (!a().clickText("OK")) a().clickText("Uninstall"); } break; }
-            case "install_app": view("market://search?q=" + enc(o.optString("name")));
-                if (a() != null) { sleep(3500); a().clickText("Install"); } break;
-            case "install_apk": { Intent i = new Intent(Intent.ACTION_GET_CONTENT).setType("application/vnd.android.package-archive");
-                start(Intent.createChooser(i, "Pick APK")); break; }
+            case "open_app": if (openApp(o.optString("name"))) return true; say.say("I couldn't find an app called " + o.optString("name") + "."); return false;
+            case "close_app": say.say("Android doesn't let me close other apps, so I opened Recents. Swipe the app away there."); return global(AccessibilityService.GLOBAL_ACTION_RECENTS);
+            case "install_app": return view("market://search?q=" + enc(o.optString("name"))) || view("https://play.google.com/store/search?q=" + enc(o.optString("name")) + "&c=apps");
+            case "install_apk": return start(new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS));
+            case "uninstall_app": { String p = findPackage(o.optString("name")); if (p == null) { say.say("I couldn't find that app."); return false; }
+                return start(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + p))); }
+            case "app_info": { String p = findPackage(o.optString("name")); if (p == null) { say.say("I couldn't find that app."); return false; }
+                return start(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + p))); }
 
-            // ----- screen interaction -----
-            case "click_text": if (need() && !s.clickText(o.optString("text"))) say.say("I couldn't find " + o.optString("text") + " on screen."); break;
-            case "long_click_text": if (need()) s.clickText(o.optString("text"), true); break;
-            case "type_text": case "chat_type": if (need() && !s.typeText(o.optString("text"), false)) say.say("I couldn't find a text box."); break;
-            case "append_text": if (need()) s.typeText(o.optString("text"), true); break;
-            case "clear_text": if (need()) s.typeText("", false); break;
-            case "copy": if (need()) s.inputAction(AccessibilityNodeInfo.ACTION_COPY); break;
-            case "paste": if (need()) s.inputAction(AccessibilityNodeInfo.ACTION_PASTE); break;
-            case "select_all": if (need()) s.inputAction(AccessibilityNodeInfo.ACTION_SELECT); break;
-            case "scroll": case "swipe": if (need()) s.scroll(o.optString("dir", "down")); break;
-            case "tap": if (need()) s.tapFraction((float) o.optDouble("x", .5), (float) o.optDouble("y", .5), false); break;
-            case "double_tap": if (need()) s.tapFraction((float) o.optDouble("x", .5), (float) o.optDouble("y", .5), true); break;
-            case "zoom": if (need()) s.pinch("in".equals(o.optString("dir"))); break;
-            case "read_screen": if (need()) { String x = s.screenText(); say.say(x.isEmpty() ? "The screen looks empty." : x.replace(" | ", ", ")); } break;
-            case "wait": sleep(Math.min(o.optLong("ms", 1000), 6000)); break;
+            case "back": return global(AccessibilityService.GLOBAL_ACTION_BACK);
+            case "home": return global(AccessibilityService.GLOBAL_ACTION_HOME);
+            case "recents": return global(AccessibilityService.GLOBAL_ACTION_RECENTS);
+            case "notifications": return global(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS);
+            case "quick_settings": return global(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS);
+            case "screenshot": return global(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT);
+            case "lock": return global(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN);
+            case "power_menu": return global(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG);
 
-            // ----- media -----
-            case "media": media(o.optString("cmd")); break;
-            case "volume": volume(o.optString("cmd")); break;
-            case "play_music": { Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
-                i.putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*").putExtra(android.app.SearchManager.QUERY, o.optString("query"));
-                if (!start(i)) view("https://music.youtube.com/search?q=" + enc(o.optString("query"))); break; }
-            case "youtube_search": ytSearch(o.optString("query")); break;
-            case "youtube_play": ytSearch(o.optString("query")); sleep(3800);
-                if (a() != null && !a().clickContaining("play video")) a().tapFraction(.5f, .3f, false); break;
-            case "youtube_category": openApp("YouTube"); sleep(2800);
-                if (a() == null || !a().clickText(o.optString("name"))) ytSearch(o.optString("name")); break;
-            case "open_gallery": { Intent i = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY);
-                if (!start(i)) start(new Intent(Intent.ACTION_VIEW).setType("image/*")); break; }
-            case "open_camera": start(new Intent(o.optBoolean("video") ? MediaStore.INTENT_ACTION_VIDEO_CAMERA : MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); break;
+            case "scroll": s.scroll(o.optString("dir")); return true;
+            case "click_text": if (s.clickText(o.optString("text"))) return true; say.say("I couldn't find “" + o.optString("text") + "” on screen."); return false;
+            case "long_click_text": return s.clickText(o.optString("text"), true);
+            case "type_text": case "chat_type": if (s.typeText(o.optString("text"), false)) return true; say.say("I couldn't find a text box to type in."); return false;
+            case "append_text": return s.typeText(o.optString("text"), true);
+            case "clear_text": return s.typeText("", false);
+            case "copy": return s.inputAction(AccessibilityNodeInfo.ACTION_COPY);
+            case "paste": return s.inputAction(AccessibilityNodeInfo.ACTION_PASTE);
+            case "select_all": return s.inputAction(AccessibilityNodeInfo.ACTION_SELECT);
+            case "tap": s.tapFraction((float) o.optDouble("x"), (float) o.optDouble("y"), false); return true;
+            case "double_tap": s.tapFraction((float) o.optDouble("x"), (float) o.optDouble("y"), true); return true;
+            case "zoom": s.pinch("in".equals(o.optString("dir"))); return true;
+            case "read_screen": { String x = s.screenText(); say.say(x.isEmpty() ? "The screen looks empty." : x.replace(" | ", ", ")); return true; }
+            case "wait": sleep(o.optLong("ms", 1000)); return true;
 
-            // ----- system -----
-            case "flashlight": { CameraManager cm = (CameraManager) c.getSystemService(Context.CAMERA_SERVICE);
-                cm.setTorchMode(cm.getCameraIdList()[0], "on".equals(o.optString("state"))); break; }
-            case "wifi_panel": if (!start(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY))) start(new Intent(Settings.ACTION_WIFI_SETTINGS)); break;
-            case "bluetooth_panel": start(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); break;
-            case "settings": settings(o.optString("page")); break;
-            case "open_url": view(o.optString("url")); break;
-            case "web_search": view("https://www.google.com/search?q=" + enc(o.optString("query"))); break;
-            case "alarm": start(new Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, o.optInt("hour"))
-                .putExtra(AlarmClock.EXTRA_MINUTES, o.optInt("minute")).putExtra(AlarmClock.EXTRA_MESSAGE, o.optString("label", "Alex"))
-                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)); break;
-            case "timer": start(new Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, o.optInt("seconds", 60))
-                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)); break;
-            case "share": start(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, o.optString("text")), "Share")); break;
+            case "media": return media(o.optString("cmd"));
+            case "volume": volume(o.optString("cmd")); return true;
+            case "play_music": { Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                    .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*").putExtra(android.app.SearchManager.QUERY, o.optString("query"));
+                return start(i) || view("https://music.youtube.com/search?q=" + enc(o.optString("query"))); }
+            case "youtube_search": { String u = "https://www.youtube.com/results?search_query=" + enc(o.optString("query"));
+                return start(new Intent(Intent.ACTION_VIEW, Uri.parse(u)).setPackage("com.google.android.youtube")) || view(u); }
+            case "youtube_music": { String u = "https://music.youtube.com/search?q=" + enc(o.optString("query"));
+                return start(new Intent(Intent.ACTION_VIEW, Uri.parse(u)).setPackage("com.google.android.apps.youtube.music")) || view(u); }
+            case "open_gallery": return start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY))
+                    || start(new Intent(Intent.ACTION_VIEW).setType("image/*"));
+            case "open_camera": return start(new Intent(o.optBoolean("video") ? MediaStore.INTENT_ACTION_VIDEO_CAMERA : MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA));
 
-            // ----- calls & chat -----
-            case "call": call(o.optString("who")); break;
-            case "sms": sms(o.optString("to"), o.optString("text")); break;
-            case "whatsapp_send": { String n = number(o.optString("to"));
-                if (n == null) { say.say("I couldn't find that contact."); break; }
-                view("https://wa.me/" + n.replace("+", "") + "?text=" + enc(o.optString("text")));
-                sleep(3200); if (a() != null) { if (!a().clickText("Send")) a().tapFraction(.93f, .93f, false); } break; }
-            case "chat_open": openApp(o.optString("app")); sleep(2800);
-                if (need()) { s = a(); s.clickText("Search"); sleep(900); s.typeText(o.optString("contact"), false); sleep(1600);
-                    if (!s.clickText(o.optString("contact"))) s.tapFraction(.5f, .25f, false); } break;
-            case "chat_send": if (need() && !a().clickText("Send")) a().clickContaining("send"); break;
-            case "chat_call": if (need()) { boolean v = o.optBoolean("video"); if (!a().clickText(v ? "Video call" : "Voice call")) a().clickText(v ? "Video" : "Call"); } break;
-            default: break;
+            case "open_url": return view(o.optString("url"));
+            case "web_search": return view("https://www.google.com/search?q=" + enc(o.optString("query")));
+            case "share": return start(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, o.optString("text")), "Share"));
+
+            case "flashlight": try { CameraManager cm = (CameraManager) c.getSystemService(Context.CAMERA_SERVICE);
+                cm.setTorchMode(cm.getCameraIdList()[0], "on".equals(o.optString("state"))); return true; }
+                catch (Exception e) { say.say("This device didn't let me use the flashlight."); return false; }
+            case "wifi_panel": return start(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)) || start(new Intent(Settings.ACTION_WIFI_SETTINGS));
+            case "bluetooth_panel": return start(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+            case "settings": return start(new Intent(settingsAction(o.optString("page"))));
+            case "alarm": return start(new Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, o.optInt("hour"))
+                    .putExtra(AlarmClock.EXTRA_MINUTES, o.optInt("minute")).putExtra(AlarmClock.EXTRA_MESSAGE, o.optString("label", "Alex")));
+            case "timer": return start(new Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, o.optInt("seconds", 60))
+                    .putExtra(AlarmClock.EXTRA_SKIP_UI, true));
+            case "open_utility": return utility(o.optString("name"));
+
+            case "call": return call(o.optString("who"));
+            case "sms_draft": { String n = number(o.optString("to")); if (n == null) { say.say("I couldn't find that contact's number."); return false; }
+                return start(new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + n)).putExtra("sms_body", o.optString("text"))); }
+            case "whatsapp_send": { String n = number(o.optString("to")); if (n == null) { say.say("I couldn't find that contact's number."); return false; }
+                if (!view("https://wa.me/" + n.replace("+", "") + "?text=" + enc(o.optString("text")))) return false;
+                sleep(3200);
+                if (!s.clickText("Send")) say.say("I opened the message. Please tap Send yourself."); return true; }
+            case "chat_open": if (!openApp(o.optString("app"))) { say.say("That chat app isn't installed."); return false; }
+                sleep(2800); s.clickText("Search"); sleep(900);
+                if (!s.typeText(o.optString("contact"), false)) return false;
+                sleep(1600);
+                if (!s.clickText(o.optString("contact"))) { say.say("Please pick the contact from the list."); return false; }
+                return true;
+            case "chat_send": return s.clickText("Send");
+            case "chat_call": { boolean v = o.optBoolean("video"); return s.clickText(v ? "Video call" : "Voice call") || s.clickText(v ? "Video" : "Call"); }
+            default: return false;
         }
     }
 
-    // ---------- helpers ----------
-    private void ytSearch(String q) {
-        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + enc(q))).setPackage("com.google.android.youtube");
-        if (!start(i)) view("https://www.youtube.com/results?search_query=" + enc(q));
+    private boolean utility(String n) {
+        switch (n) {
+            case "calculator": return start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR));
+            case "calendar": return start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR));
+            case "contacts": return start(new Intent(Intent.ACTION_VIEW, ContactsContract.Contacts.CONTENT_URI));
+            case "maps": return start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MAPS));
+            case "browser": return start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER));
+            case "files": return start(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE));
+        }
+        return false;
     }
 
     private String findPackage(String name) {
         if (name == null || name.isEmpty()) return null;
         PackageManager pm = c.getPackageManager();
         Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        String best = null; int score = 0, n = name.toLowerCase().length();
-        String nm = name.toLowerCase();
+        String best = null, nm = name.toLowerCase(); int score = 0;
         for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
             String l = r.loadLabel(pm).toString().toLowerCase();
             int sc = l.equals(nm) ? 3 : l.startsWith(nm) ? 2 : (l.contains(nm) || (l.length() > 2 && nm.contains(l))) ? 1 : 0;
@@ -172,7 +154,7 @@ public class ActionExecutor {
         return i != null && start(i);
     }
 
-    private void media(String cmd) {
+    private boolean media(String cmd) {
         int k;
         switch (cmd) {
             case "play": k = KeyEvent.KEYCODE_MEDIA_PLAY; break;
@@ -187,41 +169,41 @@ public class ActionExecutor {
         AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
         am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, k));
         am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, k));
+        return true; // Android gives no result signal: only works if a media session is active.
     }
 
     private void volume(String cmd) {
         AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
-        int d = AudioManager.ADJUST_SAME;
-        if ("up".equals(cmd)) d = AudioManager.ADJUST_RAISE;
-        else if ("down".equals(cmd)) d = AudioManager.ADJUST_LOWER;
-        else if ("mute".equals(cmd)) d = AudioManager.ADJUST_MUTE;
-        if ("max".equals(cmd)) am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), AudioManager.FLAG_SHOW_UI);
-        else am.adjustStreamVolume(AudioManager.STREAM_MUSIC, d, AudioManager.FLAG_SHOW_UI);
+        if ("max".equals(cmd)) { am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), AudioManager.FLAG_SHOW_UI); return; }
+        int d = "up".equals(cmd) ? AudioManager.ADJUST_RAISE : "down".equals(cmd) ? AudioManager.ADJUST_LOWER : AudioManager.ADJUST_MUTE;
+        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, d, AudioManager.FLAG_SHOW_UI);
     }
 
-    private void settings(String page) {
-        String a = Settings.ACTION_SETTINGS;
-        switch (page == null ? "" : page.toLowerCase()) {
-            case "wifi": a = Settings.ACTION_WIFI_SETTINGS; break;
-            case "bluetooth": a = Settings.ACTION_BLUETOOTH_SETTINGS; break;
-            case "display": a = Settings.ACTION_DISPLAY_SETTINGS; break;
-            case "sound": a = Settings.ACTION_SOUND_SETTINGS; break;
-            case "battery": a = Intent.ACTION_POWER_USAGE_SUMMARY; break;
-            case "apps": a = Settings.ACTION_APPLICATION_SETTINGS; break;
-            case "location": a = Settings.ACTION_LOCATION_SOURCE_SETTINGS; break;
-            case "storage": a = Settings.ACTION_INTERNAL_STORAGE_SETTINGS; break;
-            case "accessibility": a = Settings.ACTION_ACCESSIBILITY_SETTINGS; break;
-            case "airplane": a = Settings.ACTION_AIRPLANE_MODE_SETTINGS; break;
-            case "date": a = Settings.ACTION_DATE_SETTINGS; break;
-            case "language": a = Settings.ACTION_LOCALE_SETTINGS; break;
+    private String settingsAction(String page) {
+        switch (page.toLowerCase()) {
+            case "wifi": return Settings.ACTION_WIFI_SETTINGS;
+            case "bluetooth": return Settings.ACTION_BLUETOOTH_SETTINGS;
+            case "display": return Settings.ACTION_DISPLAY_SETTINGS;
+            case "sound": return Settings.ACTION_SOUND_SETTINGS;
+            case "battery": return Intent.ACTION_POWER_USAGE_SUMMARY;
+            case "apps": return Settings.ACTION_APPLICATION_SETTINGS;
+            case "location": return Settings.ACTION_LOCATION_SOURCE_SETTINGS;
+            case "storage": return Settings.ACTION_INTERNAL_STORAGE_SETTINGS;
+            case "accessibility": return Settings.ACTION_ACCESSIBILITY_SETTINGS;
+            case "airplane": return Settings.ACTION_AIRPLANE_MODE_SETTINGS;
+            case "date": return Settings.ACTION_DATE_SETTINGS;
+            case "language": return Settings.ACTION_LOCALE_SETTINGS;
+            case "network": return Settings.ACTION_WIRELESS_SETTINGS;
+            case "hotspot": return "android.settings.TETHER_SETTINGS";
         }
-        start(new Intent(a));
+        return Settings.ACTION_SETTINGS;
     }
 
     private String number(String who) {
         if (who == null) return null;
         if (who.matches("[+0-9 \\-()]{5,}")) return who.replaceAll("[^+0-9]", "");
-        if (c.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null;
+        if (c.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            say.say("Allow contacts access in Settings so I can look up " + who + "."); return null; }
         Cursor cu = c.getContentResolver().query(Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI, Uri.encode(who)),
             new String[]{ContactsContract.CommonDataKinds.Phone.NUMBER}, null, null, null);
         try { if (cu != null && cu.moveToFirst()) return cu.getString(0).replaceAll("[^+0-9]", ""); }
@@ -229,19 +211,10 @@ public class ActionExecutor {
         return null;
     }
 
-    private void call(String who) {
+    private boolean call(String who) {
         String n = number(who);
-        if (n == null) { say.say("I couldn't find " + who + " in your contacts."); start(new Intent(Intent.ACTION_DIAL)); return; }
+        if (n == null) { say.say("I couldn't find " + who + "."); return false; }
         boolean ok = c.checkSelfPermission(android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
-        start(new Intent(ok ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + n)));
-    }
-
-    @SuppressWarnings("deprecation")
-    private void sms(String to, String text) {
-        String n = number(to);
-        if (n == null || c.checkSelfPermission(android.Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            say.say("I need the contact and SMS permission for that."); return; }
-        SmsManager sm = Build.VERSION.SDK_INT >= 31 ? c.getSystemService(SmsManager.class) : SmsManager.getDefault();
-        sm.sendMultipartTextMessage(n, null, sm.divideMessage(text), null, null);
+        return start(new Intent(ok ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + n)));
     }
 }
