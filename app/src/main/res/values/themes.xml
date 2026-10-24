@@ -1,0 +1,10 @@
+<resources>
+    <style name="AppTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_app</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:textColor">#FFFFFF</item>
+    </style>
+    <style name="Row"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:padding">10dp</item><item name="android:textSize">15sp</item><item name="android:textColor">#FFFFFF</item></style>
+    <style name="Tab"><item name="android:layout_width">56dp</item><item name="android:layout_height">56dp</item><item name="android:padding">16dp</item><item name="android:layout_margin">2dp</item><item name="android:background">@drawable/nav_item_bg</item></style>
+</resources>

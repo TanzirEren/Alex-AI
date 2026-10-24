@@ -1,0 +1,34 @@
+<resources>
+    <string name="acc_desc">Lets Alex tap, type, scroll and control apps by voice command.</string>
+    <string name="features">
+MEDIA CONTROL\n
+• Play / pause / next / previous / stop media\n
+• Volume up, down, mute, max\n
+• Open gallery, camera, video recorder\n
+• Zoom in / out on photos (pinch gesture)\n
+• Play music by song or artist\n
+• YouTube: search, play first result, open categories\n
+\n
+APPS\n
+• Open any app, close app, back, home, recents\n
+• Tap / long-press anything by its text\n
+• Type, clear, copy, paste, select all\n
+• Scroll and swipe in any direction, tap, double tap\n
+• Install and uninstall apps\n
+\n
+CHAT (WhatsApp, Telegram, Messenger, Instagram…)\n
+• Open any chat by contact name\n
+• Write text, edit text, send\n
+• Voice call and video call\n
+• Send SMS, make phone calls\n
+\n
+SYSTEM\n
+• Notifications, quick settings, screenshot, lock screen, power menu\n
+• Flashlight, Wi-Fi panel, Bluetooth panel, any Settings page\n
+• Alarm, timer, share text, web search, open links\n
+• Read the screen aloud, time, battery\n
+\n
+Say “Hey Alex” or “Alex start”, then your command.\n
+Example: “Hey Alex, open WhatsApp and message Rahim hello”
+    </string>
+</resources>
